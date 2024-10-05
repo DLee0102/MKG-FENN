@@ -268,6 +268,8 @@ def main():
         train_y = new_label[train_idx]
         test_x = x_datasets[test_idx]
         test_y = new_label[test_idx]
+        
+        # train
         test_loss, test_acc, train_loss, train_acc, test_list,test_output = train(train_x,train_y,test_x,test_y,net)
         train_sum += train_acc
         test_sum += test_acc
@@ -277,6 +279,7 @@ def main():
         y_true = np.hstack((y_true, test_y))
         print('fold %d, test_loss %f, test_acc %f, train_loss %f, train_acc %f' % (
             i, test_loss, test_acc, train_loss, train_acc))
+        
     result_all, result_eve = evaluate(y_pred, y_score, y_true, args.event_num)
     save_result("../result/", "all", result_all)
     save_result("../result/", "each", result_eve)

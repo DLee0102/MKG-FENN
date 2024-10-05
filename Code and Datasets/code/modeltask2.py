@@ -6,7 +6,7 @@ from collections import defaultdict
 import numpy as np
 import os
 
-
+# 直接一次性把整张图丢进模型，然后训练，但是每次训练只能训到训练集的embedding和aggregation（w, b）参数
 class GNN1(nn.Module):
     def __init__(self, dataset, tail_len, relation_len, args, dict1, drug_name, **kwargs):
         super(GNN1, self).__init__(**kwargs)
@@ -39,24 +39,30 @@ class GNN1(nn.Module):
         drug_name = torch.LongTensor(drug_name)
         adj_tail = torch.LongTensor(adj_tail)
         adj_relation = torch.LongTensor(adj_relation)
+        
         drug_embedding = self.drug_embed(drug_name)
         rela_embedding = self.rela_embed(adj_relation)
         ent_embedding = self.ent_embed(adj_tail)
+        
         drug_rel = drug_embedding.reshape((572, 1, args.embedding_num)) * rela_embedding
         drug_rel_weigh = drug_rel.matmul(self.W1) + self.b1
         drug_rel_weigh = self.relu(drug_rel_weigh)
-        drug_rel_weigh = drug_rel_weigh.matmul(self.W2) + self.b2
+        drug_rel_weigh = drug_rel_weigh.matmul(self.W2) + self.b2   
         drug_rel_score = torch.sum(drug_rel_weigh, axis=-1, keepdims=True)
-        drug_rel_score = self.soft(drug_rel_score)
-        weighted_ent = drug_rel_score.reshape((572, 1, args.neighbor_sample_size)).matmul(ent_embedding)
+        drug_rel_score = self.soft(drug_rel_score)   # rule 2
+        
+        weighted_ent = drug_rel_score.reshape((572, 1, args.neighbor_sample_size)).matmul(ent_embedding)  # rule 3
         drug_e = torch.cat(
-            [weighted_ent.reshape(572, args.embedding_num), drug_embedding.reshape((572, args.embedding_num))], dim=1)
+            [weighted_ent.reshape(572, args.embedding_num), drug_embedding.reshape((572, args.embedding_num))], dim=1)  # rule 4
         drug_f = self.Linear1(drug_e)
         idx, train_or_test, test_adj = datas[0], datas[1], datas[2]
+        
         if train_or_test == 1:
             for i in test_adj[0].keys():
                 pos = test_adj[0][i][0]
                 length = len(pos)
+                
+                # 选择出相似度较高的训练集中的药物来得到测试集的embedding
                 drug_f[i] = torch.sum(drug_f[pos], dim=0) / length
         return drug_f, idx, test_adj, train_or_test
 
@@ -66,11 +72,14 @@ class GNN1(nn.Module):
         for i in drug_name_id:
             all_neighbors = kg[drug_name_id[i]]
             n_neighbor = len(all_neighbors)
+            
+            # 有放回采样和无放回采样
             sample_indices = np.random.choice(
                 n_neighbor,
                 neighbor_sample_size,
                 replace=False if n_neighbor >= neighbor_sample_size else True
             )
+            # 邻接表
             adj_tail[drug_name_id[i]] = np.array([all_neighbors[i][0] for i in sample_indices])
             adj_relation[drug_name_id[i]] = np.array([all_neighbors[i][1] for i in sample_indices])
         return adj_tail, adj_relation
@@ -253,12 +262,15 @@ class GNN4(nn.Module):
         kg, dict1, args, drug_name = self.kg, self.dict1, self.args, self.drug_name
         gnn3_embedding, gnn2_embedding, gnn1_embedding, idx, test_adj, train_or_test = arguments
         adj_tail, adj_relation = self.arrge(kg, dict1, args.neighbor_sample_size)
+        
         drug_name = torch.LongTensor(drug_name)
         adj_tail = torch.LongTensor(adj_tail)
         adj_relation = torch.LongTensor(adj_relation)
+        
         drug_embedding = self.drug_embed(drug_name)
         rela_embedding = self.rela_embed(adj_relation)
         ent_embedding = self.ent_embed(adj_tail)
+        
         drug_rel = drug_embedding.reshape((572, 1, args.embedding_num)) * rela_embedding
         drug_rel_weigh = drug_rel.matmul(self.W1) + self.b1
         drug_rel_weigh = self.relu(drug_rel_weigh)
