@@ -36,6 +36,10 @@ class GNN1(nn.Module):
         drug_name=torch.LongTensor(drug_name)
         adj_tail=torch.LongTensor(adj_tail)
         adj_relation=torch.LongTensor(adj_relation)
+        
+        drug_name = drug_name.to(idx.device)
+        adj_tail = adj_tail.to(idx.device)
+        adj_relation = adj_relation.to(idx.device)
 
 
         drug_embedding = self.drug_embed(drug_name)
@@ -103,6 +107,10 @@ class GNN2(nn.Module):
         drug_name=torch.LongTensor(drug_name)
         adj_tail=torch.LongTensor(adj_tail)
         adj_relation=torch.LongTensor(adj_relation)
+        
+        drug_name = drug_name.to(idx.device)
+        adj_tail = adj_tail.to(idx.device)
+        adj_relation = adj_relation.to(idx.device)
 
         drug_embedding = self.drug_embed(drug_name)
         rela_embedding = self.rela_embed(adj_relation)
@@ -168,7 +176,10 @@ class GNN3(nn.Module):
         drug_name=torch.LongTensor(drug_name)
         adj_tail=torch.LongTensor(adj_tail)
         adj_relation=torch.LongTensor(adj_relation)
-
+        
+        drug_name = drug_name.to(idx.device)
+        adj_tail = adj_tail.to(idx.device)
+        adj_relation = adj_relation.to(idx.device)
 
         drug_embedding = self.drug_embed(drug_name)
         rela_embedding = self.rela_embed(adj_relation)
@@ -244,7 +255,10 @@ class GNN4(nn.Module):
         drug_name=torch.LongTensor(drug_name)
         adj_tail=torch.LongTensor(adj_tail)
         adj_relation=torch.LongTensor(adj_relation)
-
+        
+        drug_name = drug_name.to(idx.device)
+        adj_tail = adj_tail.to(idx.device)
+        adj_relation = adj_relation.to(idx.device)
 
         drug_embedding = self.drug_embed(drug_name)
         rela_embedding = self.rela_embed(adj_relation)
@@ -300,7 +314,12 @@ class FusionLayer(nn.Module):
     def forward(self, arguments):
         gnn4_embedding, gnn3_embedding, gnn2_embedding, gnn1_embedding, idx = arguments
 
-        idx = idx.numpy().tolist()
+        # fix here
+        if idx.is_cuda:
+            idx = idx.cpu().numpy().tolist()
+        else:
+            idx = idx.numpy().tolist()
+            
         drugA = []
         drugB = []
         for i in idx:

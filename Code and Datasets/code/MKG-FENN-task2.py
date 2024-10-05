@@ -29,7 +29,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 parser = argparse.ArgumentParser(description='GNN based on the whole datas')
-parser.add_argument("--epoches",type=int,choices=[100,500,1000,2000],default=100)
+parser.add_argument("--epoches",type=int,choices=[100,500,1000,2000],default=100)  # default=100
 parser.add_argument("--batch_size",type=int,choices=[2048,1024,512,256,128],default=1024)
 parser.add_argument("--weigh_decay",type=float,choices=[1e-1,1e-2,1e-3,1e-4,1e-8],default=1e-8)
 parser.add_argument("--lr",type=float,choices=[1e-3,1e-4,1e-5,4*1e-3],default=5*1e-3) #4*1e-3
@@ -47,6 +47,10 @@ args = parser.parse_args()
 
 random.seed(args.seed)
 os.environ['PYTHONHASHSEED'] = str(args.seed)
+
+# support cuda if available
+os.environ['CUBLAS_WORKSPACE_CONFIG']=':4096:8'
+
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 torch.cuda.manual_seed(args.seed)
@@ -168,7 +172,7 @@ def save_result(filepath,result_type,result):
             writer.writerow(i)
     return 0
 
-def train(train_x,train_y,test_x,test_y,net,test_adj):
+def train(train_x,train_y,test_x,test_y,net,test_adj,device):
     loss_function=nn.CrossEntropyLoss()
     opti = torch.optim.Adam(net.parameters(), lr=args.lr,weight_decay=args.weigh_decay)
     test_loss, test_acc, train_l = 0, 0, 0
@@ -177,6 +181,10 @@ def train(train_x,train_y,test_x,test_y,net,test_adj):
     train_x[:,[0,1]] = train_x[:,[1,0]]
     train_x_total = torch.LongTensor(np.concatenate([train_x1, train_x], axis=0))
     train_y = torch.LongTensor(np.concatenate([train_y,train_y]))
+    
+    # support cuda if available
+    test_x = torch.LongTensor(test_x).to(device)
+    test_label = torch.LongTensor(test_y).to(device)
 
     train_data = TensorDataset(train_x_total, train_y)
     train_iter = DataLoader(train_data, args.batch_size, shuffle=True)
@@ -191,6 +199,11 @@ def train(train_x,train_y,test_x,test_y,net,test_adj):
             train_acc = 0
             train_label = torch.LongTensor(y)
             x = torch.LongTensor(x)
+            
+            # support cuda if available
+            x = x.to(device)
+            train_label = train_label.to(device)
+            
             f_input = list()
             f_input.append(x)
             f_input.append(0)
@@ -200,21 +213,38 @@ def train(train_x,train_y,test_x,test_y,net,test_adj):
             l.backward()
             opti.step()
             train_l += l.item()
-            train_acc = accuracy_score(torch.argmax(output,dim=1), train_label)
+            
+            # support cuda if available
+            if device == torch.device('cuda:0'):
+                train_acc = accuracy_score(torch.argmax(output.cpu(),dim=1), train_label.cpu())
+            else:
+                train_acc = accuracy_score(torch.argmax(output,dim=1), train_label)
+
             train_a.append(train_acc)
         net.eval()
         with torch.no_grad():
-            test_x = torch.LongTensor(test_x)
+            
+            # test_x = torch.LongTensor(test_x)
+            
             f_input = list()
             f_input.append(test_x)
             f_input.append(1)
             f_input.append(test_adj)
             test_output = F.softmax(net(f_input),dim=1)
-            test_label = torch.LongTensor(test_y)
+            
+            # test_label = torch.LongTensor(test_y)
+            
             loss = loss_function(test_output, test_label)
             test_loss = loss.item()
-            test_score = f1_score(torch.argmax(test_output,dim=1), test_label,average='macro')
-            test_acc = accuracy_score(torch.argmax(test_output,dim=1), test_label)
+            
+            # support cuda if available
+            if device == torch.device('cuda:0'):
+                test_score = f1_score(torch.argmax(test_output.cpu(),dim=1), test_label.cpu(), average='macro')
+                test_acc = accuracy_score(torch.argmax(test_output.cpu(),dim=1), test_label.cpu())
+            else:
+                test_score = f1_score(torch.argmax(test_output,dim=1), test_label, average='macro')
+                test_acc = accuracy_score(torch.argmax(test_output,dim=1), test_label)
+                
             test_list.append(test_score)
             if test_score == max(test_list):
                 max_test_output = test_output
@@ -393,11 +423,15 @@ def main():
     y_true = np.array([])
     y_score = np.zeros((0, 65), dtype=float)
     y_pred = np.array([])
+    
+    # support cuda if available
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    
     for cross_ver in range(5):
         net = nn.Sequential(GNN1(dataset, tail_len, relation_len, args, dict1, drug_name),
                             GNN2(dataset, tail_len, relation_len, args, dict1,drug_name),
                             GNN3(dataset, tail_len, relation_len, args, dict1,drug_name),
-                            FusionLayer(args))
+                            FusionLayer(args)).to(device)
         X_train = []
         X_test = []
         y_train = []
@@ -419,12 +453,23 @@ def main():
         test_y = new_label[y_test]
 
         test_loss, test_acc, train_loss, train_acc, test_list, test_output = train(train_x, train_y, test_x, test_y,
-                                                                                   net,test_adj[cross_ver])
+                                                                                   net,test_adj[cross_ver],device)
         train_sum += train_acc
         test_sum += test_acc
-        pred_type = torch.argmax(test_output, dim=1).numpy()
+        
+        # support cuda if available
+        if device == torch.device('cuda:0'):
+            pred_type = torch.argmax(test_output.cpu(), dim=1).numpy()
+        else:
+            pred_type = torch.argmax(test_output, dim=1).numpy()
         y_pred = np.hstack((y_pred, pred_type))
-        y_score = np.row_stack((y_score, test_output))
+        
+        # support cuda if available
+        if device == torch.device('cuda:0'):
+            y_score = np.row_stack((y_score, test_output.cpu()))
+        else:
+            y_score = np.row_stack((y_score, test_output))
+        
         y_true = np.hstack((y_true, test_y))
         print('fold %d, test_loss %f, test_acc %f, train_loss %f, train_acc %f' % (
                 cross_ver, test_loss, test_acc, train_loss, train_acc))

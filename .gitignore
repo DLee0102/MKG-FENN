@@ -1,0 +1,6 @@
+__pycache__/
+log/
+event.db
+result/
+drugbank/
+DDIMDL/

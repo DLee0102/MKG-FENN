@@ -36,9 +36,12 @@ class GNN1(nn.Module):
     def forward(self, datas):
         kg, dict1, args, drug_name = self.kg, self.dict1, self.args, self.drug_name
         adj_tail, adj_relation = self.arrge(kg, dict1, args.neighbor_sample_size)
-        drug_name = torch.LongTensor(drug_name)
-        adj_tail = torch.LongTensor(adj_tail)
-        adj_relation = torch.LongTensor(adj_relation)
+        idx, train_or_test, test_adj = datas[0], datas[1], datas[2]
+        
+        # support cuda if available
+        drug_name = torch.LongTensor(drug_name).to(idx.device)
+        adj_tail = torch.LongTensor(adj_tail).to(idx.device)
+        adj_relation = torch.LongTensor(adj_relation).to(idx.device)
         drug_embedding = self.drug_embed(drug_name)
         rela_embedding = self.rela_embed(adj_relation)
         ent_embedding = self.ent_embed(adj_tail)
@@ -52,7 +55,7 @@ class GNN1(nn.Module):
         drug_e = torch.cat(
             [weighted_ent.reshape(572, args.embedding_num), drug_embedding.reshape((572, args.embedding_num))], dim=1)
         drug_f = self.Linear1(drug_e)
-        idx, train_or_test, test_adj = datas[0], datas[1], datas[2]
+        
         if train_or_test == 1:
             for i in test_adj[0].keys():
                 pos = test_adj[0][i][0]
@@ -106,9 +109,11 @@ class GNN2(nn.Module):
         gnn1_embedding, idx, test_adj, train_or_test = arguments
 
         adj_tail, adj_relation = self.arrge(kg, dict1, args.neighbor_sample_size)
-        drug_name = torch.LongTensor(drug_name)
-        adj_tail = torch.LongTensor(adj_tail)
-        adj_relation = torch.LongTensor(adj_relation)
+        
+        # support cuda if available
+        drug_name = torch.LongTensor(drug_name).to(idx.device)
+        adj_tail = torch.LongTensor(adj_tail).to(idx.device)
+        adj_relation = torch.LongTensor(adj_relation).to(idx.device)
         drug_embedding = self.drug_embed(drug_name)
         rela_embedding = self.rela_embed(adj_relation)
         ent_embedding = self.ent_embed(adj_tail)
@@ -175,9 +180,11 @@ class GNN3(nn.Module):
         gnn2_embedding, gnn1_embedding, idx, test_adj, train_or_test = arguments
 
         adj_tail, adj_relation = self.arrge(kg, dict1, args.neighbor_sample_size)
-        drug_name = torch.LongTensor(drug_name)
-        adj_tail = torch.LongTensor(adj_tail)
-        adj_relation = torch.LongTensor(adj_relation)
+        
+        # support cuda if available
+        drug_name = torch.LongTensor(drug_name).to(idx.device)
+        adj_tail = torch.LongTensor(adj_tail).to(idx.device)
+        adj_relation = torch.LongTensor(adj_relation).to(idx.device)
         drug_embedding = self.drug_embed(drug_name)
         rela_embedding = self.rela_embed(adj_relation)
         ent_embedding = self.ent_embed(adj_tail)
@@ -253,9 +260,11 @@ class GNN4(nn.Module):
         kg, dict1, args, drug_name = self.kg, self.dict1, self.args, self.drug_name
         gnn3_embedding, gnn2_embedding, gnn1_embedding, idx, test_adj, train_or_test = arguments
         adj_tail, adj_relation = self.arrge(kg, dict1, args.neighbor_sample_size)
-        drug_name = torch.LongTensor(drug_name)
-        adj_tail = torch.LongTensor(adj_tail)
-        adj_relation = torch.LongTensor(adj_relation)
+        
+        # support cuda if available
+        drug_name = torch.LongTensor(drug_name).to(idx.device)
+        adj_tail = torch.LongTensor(adj_tail).to(idx.device)
+        adj_relation = torch.LongTensor(adj_relation).to(idx.device)
         drug_embedding = self.drug_embed(drug_name)
         rela_embedding = self.rela_embed(adj_relation)
         ent_embedding = self.ent_embed(adj_tail)
@@ -316,7 +325,13 @@ class FusionLayer(nn.Module):
     def forward(self, arguments):
         # gnn4_embedding[drugA],,gnn4_embedding[drugB]  gnn4_embedding, gnn4_embedding,gnn4_embedding[drugA],,gnn4_embedding[drugB]gnn4_embedding,gnn4_embedding[drugA],,gnn4_embedding[drugB]
         gnn3_embedding, gnn2_embedding, gnn1_embedding, idx = arguments
-        idx = idx.numpy().tolist()
+        
+        # support cuda if available
+        if idx.is_cuda:
+            idx = idx.cpu().numpy().tolist()
+        else:
+            idx = idx.numpy().tolist()
+            
         drugA = []
         drugB = []
         for i in idx:

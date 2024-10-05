@@ -48,6 +48,9 @@ args = parser.parse_args()
 def setup_seed():
     random.seed(args.seed)
     os.environ['PYTHONHASHSEED'] = str(args.seed)
+    
+    # 这里需要添加此句
+    os.environ['CUBLAS_WORKSPACE_CONFIG']=':4096:8'
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
@@ -171,7 +174,7 @@ def save_result(filepath,result_type,result):
             writer.writerow(i)
     return 0
 
-def train(train_x,train_y,test_x,test_y,net):
+def train(train_x,train_y,test_x,test_y,net,device):
     loss_function=nn.CrossEntropyLoss()
     opti = torch.optim.Adam(net.parameters(), lr=args.lr,weight_decay=args.weigh_decay)
     test_loss, test_acc, train_l = 0, 0, 0
@@ -184,6 +187,11 @@ def train(train_x,train_y,test_x,test_y,net):
     train_iter = DataLoader(train_data, args.batch_size, shuffle=True)
     test_list = []
     max_test_output = torch.zeros((0,65),dtype=torch.float)
+    
+    # support cuda if available
+    test_x = torch.LongTensor(test_x).to(device)
+    test_label = torch.LongTensor(test_y).to(device)
+    
     for epoch in range(args.epoches):
         test_loss, test_score, train_l = 0, 0, 0
         train_a = []
@@ -193,22 +201,41 @@ def train(train_x,train_y,test_x,test_y,net):
             train_acc = 0
             train_label = torch.LongTensor(y)
             x = torch.LongTensor(x)
+            
+            x = x.to(device)
+            train_label = train_label.to(device)
+            
             output = net(x)
             l = loss_function(output, train_label)
             l.backward()
             opti.step()
             train_l += l.item()
-            train_acc = accuracy_score(torch.argmax(output,dim=1), train_label)
+            
+            # fix here
+            if device == torch.device('cuda:0'):
+                train_acc = accuracy_score(torch.argmax(output.cpu(),dim=1), train_label.cpu())
+            else:
+                train_acc = accuracy_score(torch.argmax(output,dim=1), train_label)
+                
             train_a.append(train_acc)
         net.eval()
         with torch.no_grad():
-            test_x = torch.LongTensor(test_x)
+            # fix here
+            # test_x = torch.LongTensor(test_x)
+            
             test_output = F.softmax(net(test_x),dim=1)
-            test_label = torch.LongTensor(test_y)
+            # test_label = torch.LongTensor(test_y)
+            
             loss = loss_function(test_output, test_label)
             test_loss = loss.item()
-            test_score = f1_score(torch.argmax(test_output,dim=1), test_label, average='macro')
-            test_acc = accuracy_score(torch.argmax(test_output,dim=1), test_label)
+            
+            # fix here
+            if device == torch.device('cuda:0'):
+                test_score = f1_score(torch.argmax(test_output.cpu(),dim=1), test_label.cpu(), average='macro')
+                test_acc = accuracy_score(torch.argmax(test_output.cpu(),dim=1), test_label.cpu())
+            else:
+                test_score = f1_score(torch.argmax(test_output,dim=1), test_label, average='macro')
+                test_acc = accuracy_score(torch.argmax(test_output,dim=1), test_label)
             test_list.append(test_score)
             if test_score==max(test_list):
                 max_test_output = test_output
@@ -258,17 +285,23 @@ def main():
     kf = StratifiedKFold(n_splits=5, shuffle=True, random_state=1)
 
     kfold = kf.split(x_datasets, new_label)
+    
+    # choose device
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    
     for i, (train_idx, test_idx) in enumerate(kfold):
         net = nn.Sequential(GNN1(dataset, tail_len, relation_len, args, dict1, drug_name),
                             GNN2(dataset, tail_len, relation_len, args, dict1, drug_name),
                             GNN3(dataset, tail_len, relation_len, args, dict1, drug_name),
                             GNN4(dataset, tail_len, relation_len, args, dict1, drug_name),
-                            FusionLayer(args))
+                            FusionLayer(args)).to(device)
         train_x = x_datasets[train_idx]
         train_y = new_label[train_idx]
         test_x = x_datasets[test_idx]
         test_y = new_label[test_idx]
-        test_loss, test_acc, train_loss, train_acc, test_list,test_output = train(train_x,train_y,test_x,test_y,net)
+        
+        # train
+        test_loss, test_acc, train_loss, train_acc, test_list,test_output = train(train_x,train_y,test_x,test_y,net,device)
         train_sum += train_acc
         test_sum += test_acc
         pred_type = torch.argmax(test_output, dim=1).numpy()
@@ -277,6 +310,7 @@ def main():
         y_true = np.hstack((y_true, test_y))
         print('fold %d, test_loss %f, test_acc %f, train_loss %f, train_acc %f' % (
             i, test_loss, test_acc, train_loss, train_acc))
+        
     result_all, result_eve = evaluate(y_pred, y_score, y_true, args.event_num)
     save_result("../result/", "all", result_all)
     save_result("../result/", "each", result_eve)
